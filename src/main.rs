@@ -12,22 +12,19 @@
 
 mod config;
 mod hive;
-mod writer;
 mod syncer;
+mod writer;
 
-use color_eyre::eyre::Result;
-use tracing::{info, warn, Level};
 use crate::config::{WriterType, CARGO_PKG_VERSION};
-use crate::hive::jsonrpc::client::{JsonRpcClient, JsonRpcClientImpl};
+use crate::hive::jsonrpc::client::JsonRpcClientImpl;
 use crate::syncer::Syncer;
 use crate::writer::console_writer::ConsoleWriter;
 use crate::writer::disk_writer::DiskWriter;
 use crate::writer::object_storage_writer::ObjectStorageWriter;
-use crate::writer::writer::Writer;
+use color_eyre::eyre::Result;
+use tracing::{info, warn, Level};
 // for historical purposes
 //const FIRST_PODPING_BLOCK: u64 = 53_691_004;
-
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -37,7 +34,7 @@ async fn main() -> Result<()> {
 
     let log_level = match settings.debug {
         false => Level::INFO,
-        true => Level::DEBUG
+        true => Level::DEBUG,
     };
 
     //let log_level = Level::ERROR;
@@ -50,10 +47,10 @@ async fn main() -> Result<()> {
 
     // JSON formatting throwing an error with fields from external libraries
     /*tracing_subscriber::fmt()
-        .event_format(tracing_subscriber::fmt::format::json().flatten_event(true))
-        .with_max_level(log_level)
-        .with_target(false)
-        .init();*/
+    .event_format(tracing_subscriber::fmt::format::json().flatten_event(true))
+    .with_max_level(log_level)
+    .with_target(false)
+    .init();*/
 
     //let span = span!(Level::INFO, "main").entered();
 
@@ -70,32 +67,34 @@ async fn main() -> Result<()> {
                     syncer.start().await?;
                 }
                 Some(WriterType::ObjectStorage) => {
-                    let syncer = Syncer::<JsonRpcClientImpl, ObjectStorageWriter>::new(&settings).await?;
-                    
+                    let syncer =
+                        Syncer::<JsonRpcClientImpl, ObjectStorageWriter>::new(&settings).await?;
+
                     syncer.start().await?;
-                },
+                }
                 None => {
                     panic!("Writer Type not set correctly!")
                 }
             };
-        },
+        }
         false => {
             if !settings.writer.disable_persistence_warnings {
                 warn!("The persistent writer is disabled in settings!");
 
-                if settings.scanner.start_block.is_some() || settings.scanner.start_datetime.is_some() {
+                if settings.scanner.start_block.is_some()
+                    || settings.scanner.start_datetime.is_some()
+                {
                     warn!("A start block/date is set.  Without persistence, the scan will start at the values *every time*.")
                 }
             }
-            
+
             info!("Writing podpings to the console.");
-            
+
             let syncer = Syncer::<JsonRpcClientImpl, ConsoleWriter>::new(&settings).await?;
-            
+
             syncer.start().await?;
         }
     }
-    
 
     //span.exit();
 

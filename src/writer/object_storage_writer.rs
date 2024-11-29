@@ -54,7 +54,7 @@ async fn head_bucket(osw: &ObjectStorageWriter) -> Result<Response, HeadBucketEr
     // TODO: Add retry logic
     let response = match osw.http_client.head(url).send().await {
         Ok(exists) => exists,
-        Err(e) => return Err(HeadBucketError::UnknownError),
+        Err(_) => return Err(HeadBucketError::UnknownError),
     };
 
     let status = response.status();
@@ -96,7 +96,7 @@ async fn get_object(osw: &ObjectStorageWriter, path: PathBuf) -> Result<Response
     // TODO: Add retry logic
     let response = match osw.http_client.get(url).send().await {
         Ok(response) => response,
-        Err(e) => return Err(GetObjectError::UnknownError),
+        Err(_) => return Err(GetObjectError::UnknownError),
     };
 
     let status = response.status();
@@ -153,7 +153,7 @@ async fn put_object(
         .await
     {
         Ok(response) => response,
-        Err(e) => return Err(PutObjectError::UnknownError),
+        Err(_) => return Err(PutObjectError::UnknownError),
     };
 
     let status = response.status();
@@ -242,7 +242,7 @@ async fn object_storage_write_block_transactions(
             }
         }
 
-        let s = write_join_set.join_all().await;
+        write_join_set.join_all().await;
     }
     Ok(())
 }
@@ -264,7 +264,7 @@ async fn object_storage_write_last_block(
     .await;
 
     match response {
-        Ok(r) => Ok(()),
+        Ok(_) => Ok(()),
         Err(e) => Err(e.into()),
     }
 }

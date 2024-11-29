@@ -9,11 +9,11 @@
  *
  *     You should have received a copy of the GNU Lesser General Public License along with podpingd. If not, see <https://www.gnu.org/licenses/>.
  */
-use std::path::Path;
-use std::time::Duration;
 use chrono::{DateTime, Utc};
 use config::{Config, File};
 use serde::Deserialize;
+use std::path::Path;
+use std::time::Duration;
 
 pub(crate) const CARGO_PKG_VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
 
@@ -27,20 +27,20 @@ pub struct Scanner {
 #[derive(Debug, Deserialize)]
 pub enum WriterType {
     Disk,
-    ObjectStorage
+    ObjectStorage,
 }
 
 #[derive(Debug, Deserialize)]
 pub enum WriterUrlStyle {
     Path,
-    VirtualHost
+    VirtualHost,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Writer {
     pub(crate) enabled: bool,
     pub(crate) disable_persistence_warnings: bool,
-    
+
     #[serde(rename = "type")]
     pub(crate) type_: Option<WriterType>,
 
@@ -49,11 +49,10 @@ pub struct Writer {
     #[serde(with = "humantime_serde")]
     pub(crate) disk_trim_keep_duration: Option<Duration>,
 
-
     pub(crate) object_storage_base_url: Option<String>,
     pub(crate) object_storage_bucket_name: Option<String>,
     pub(crate) object_storage_region: Option<String>,
-    pub(crate) object_storage_url_style: Option<WriterUrlStyle>
+    pub(crate) object_storage_url_style: Option<WriterUrlStyle>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,30 +63,26 @@ pub struct Settings {
     pub(crate) writer: Writer,
 }
 
-
-
 pub(crate) fn load_config() -> Settings {
     let user_config_file_option = option_env!("PODPINGD_CONFIG_FILE");
 
     let user_config_file = match user_config_file_option {
         Some(file) => {
             if !Path::new(file).exists() {
-                panic!("File {} defined by PODPINGD_CONFIG_FILE does not exist", file);
+                panic!(
+                    "File {} defined by PODPINGD_CONFIG_FILE does not exist",
+                    file
+                );
             }
             file
-        },
-        None => ""
+        }
+        None => "",
     };
 
     let config = Config::builder()
         .add_source(File::with_name("conf/00-default.toml"))
         .add_source(File::with_name(user_config_file).required(false))
-        .add_source(
-            config::Environment::with_prefix("PODPINGD")
-                .try_parsing(true)
-                .separator("_")
-                .list_separator(" "),
-        )
+        .add_source(config::Environment::with_prefix("PODPINGD").separator("__"))
         .build()
         .unwrap();
 

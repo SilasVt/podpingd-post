@@ -17,7 +17,7 @@ use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
 use color_eyre::eyre::Error;
 use color_eyre::Result;
 use podping_schemas::org::podcastindex::podping::podping_json::Podping;
-use regex::{Match, Regex};
+use regex::Regex;
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -327,7 +327,10 @@ impl Writer for DiskWriter {
                 Ok(block) => Ok(Some(block)),
                 _ => Ok(None),
             },
-            Err(e) => Err(e.into()),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => Ok(None),
+                _ => Err(e.into()),
+            },
         }
     }
 
