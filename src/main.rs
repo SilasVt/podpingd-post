@@ -17,11 +17,12 @@ mod syncer;
 
 use color_eyre::eyre::Result;
 use tracing::{info, warn, Level};
-use crate::config::CARGO_PKG_VERSION;
-use crate::hive::jsonrpc::client::JsonRpcClientImpl;
+use crate::config::{WriterType, CARGO_PKG_VERSION};
+use crate::hive::jsonrpc::client::{JsonRpcClient, JsonRpcClientImpl};
 use crate::syncer::Syncer;
 use crate::writer::console_writer::ConsoleWriter;
 use crate::writer::disk_writer::DiskWriter;
+use crate::writer::object_storage_writer::ObjectStorageWriter;
 use crate::writer::writer::Writer;
 // for historical purposes
 //const FIRST_PODPING_BLOCK: u64 = 53_691_004;
@@ -62,9 +63,21 @@ async fn main() -> Result<()> {
     match settings.writer.enabled {
         true => {
             info!("Writing podpings to the the local disk.");
-            let syncer = Syncer::<JsonRpcClientImpl, DiskWriter>::new(&settings)?;
+            match settings.writer.type_ {
+                Some(WriterType::Disk) => {
+                    let syncer = Syncer::<JsonRpcClientImpl, DiskWriter>::new(&settings).await?;
 
-            syncer.start().await?;
+                    syncer.start().await?;
+                }
+                Some(WriterType::ObjectStorage) => {
+                    let syncer = Syncer::<JsonRpcClientImpl, ObjectStorageWriter>::new(&settings).await?;
+                    
+                    syncer.start().await?;
+                },
+                None => {
+                    panic!("Writer Type not set correctly!")
+                }
+            };
         },
         false => {
             if !settings.writer.disable_persistence_warnings {
@@ -77,7 +90,7 @@ async fn main() -> Result<()> {
             
             info!("Writing podpings to the console.");
             
-            let syncer = Syncer::<JsonRpcClientImpl, ConsoleWriter>::new(&settings)?;
+            let syncer = Syncer::<JsonRpcClientImpl, ConsoleWriter>::new(&settings).await?;
             
             syncer.start().await?;
         }

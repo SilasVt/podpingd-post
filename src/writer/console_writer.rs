@@ -9,26 +9,31 @@
  *
  *     You should have received a copy of the GNU Lesser General Public License along with podpingd. If not, see <https://www.gnu.org/licenses/>.
  */
-use color_eyre::Report;
-use tokio::sync::broadcast::Receiver;
-use tracing::{error, info, warn};
-use tokio::sync::broadcast::error::RecvError;
 use crate::config::Settings;
 use crate::hive::scanner::HiveBlockWithNum;
 use crate::writer::writer::Writer;
+use color_eyre::eyre::Error;
+use color_eyre::Report;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::broadcast::Receiver;
+use tracing::{error, info, warn};
 
-pub fn console_output_block_transactions(block: HiveBlockWithNum) -> color_eyre::Result<(), Report> {
+pub fn console_output_block_transactions(
+    block: HiveBlockWithNum,
+) -> color_eyre::Result<(), Report> {
     if block.transactions.is_empty() {
         info!("No Podpings for block {}", block.block_num);
     } else {
         for tx in &block.transactions {
             for podping in tx.podpings.iter() {
-
                 let json = serde_json::to_string(&podping);
 
                 match json {
                     Ok(json) => {
-                        info!("block: {}, tx: {}, podping: {}", block.block_num, tx.tx_id, json);
+                        info!(
+                            "block: {}, tx: {}, podping: {}",
+                            block.block_num, tx.tx_id, json
+                        );
                     }
                     Err(e) => {
                         error!("Error outputting podping: {}", e);
@@ -43,15 +48,15 @@ pub fn console_output_block_transactions(block: HiveBlockWithNum) -> color_eyre:
 pub(crate) struct ConsoleWriter {}
 
 impl Writer for ConsoleWriter {
-    fn new(_: &Settings) -> Self
+    async fn new(_: &Settings) -> Self
     where
         Self: Sized,
     {
         ConsoleWriter {}
     }
 
-    async fn get_last_block(&self) -> Option<u64> {
-        None
+    async fn get_last_block(&self) -> Result<Option<u64>, Error> {
+        Ok(None)
     }
 
     async fn start(&self, mut rx: Receiver<HiveBlockWithNum>) -> color_eyre::Result<(), Report> {
@@ -75,10 +80,13 @@ impl Writer for ConsoleWriter {
                 }
                 None => {}
             }
-        };
+        }
     }
 
-    async fn start_batch(&self, mut rx: Receiver<Vec<HiveBlockWithNum>>) -> color_eyre::Result<(), Report> {
+    async fn start_batch(
+        &self,
+        mut rx: Receiver<Vec<HiveBlockWithNum>>,
+    ) -> color_eyre::Result<(), Report> {
         loop {
             let result = rx.recv().await;
 
@@ -89,9 +97,7 @@ impl Writer for ConsoleWriter {
 
                     None
                 }
-                Err(RecvError::Closed) => {
-                    break
-                }
+                Err(RecvError::Closed) => break,
             };
 
             match block {
@@ -102,7 +108,7 @@ impl Writer for ConsoleWriter {
                 }
                 None => {}
             }
-        };
+        }
 
         Ok(())
     }

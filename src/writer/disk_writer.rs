@@ -9,26 +9,29 @@
  *
  *     You should have received a copy of the GNU Lesser General Public License along with podpingd. If not, see <https://www.gnu.org/licenses/>.
  */
+use crate::config::Settings;
+use crate::hive::scanner::HiveBlockWithNum;
+use crate::writer::writer::Writer;
+use crate::writer::writer::LAST_UPDATED_BLOCK_FILENAME;
+use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
+use color_eyre::eyre::Error;
+use color_eyre::Result;
+use podping_schemas::org::podcastindex::podping::podping_json::Podping;
+use regex::{Match, Regex};
 use std::fs::remove_dir_all;
 use std::path::PathBuf;
 use std::time::Duration;
-use color_eyre::Report;
-use tokio::sync::broadcast::Receiver;
-use tracing::{debug, error, info, warn};
-use tokio::task::JoinSet;
-use podping_schemas::org::podcastindex::podping::podping_json::Podping;
-use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Timelike, Utc};
-use regex::{Match, Regex};
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::broadcast::Receiver;
+use tokio::task::JoinSet;
 use tokio::time::Instant;
+use tracing::{debug, error, info, warn};
 use walkdir::WalkDir;
-use crate::config::Settings;
-use crate::hive::scanner::HiveBlockWithNum;
-use crate::writer::writer::LAST_UPDATED_BLOCK_FILENAME;
-use crate::writer::writer::Writer;
 
-
-async fn disk_write_block_transactions(data_dir_path: PathBuf, block: HiveBlockWithNum) -> color_eyre::Result<(), Report> {
+async fn disk_write_block_transactions(
+    data_dir_path: PathBuf,
+    block: HiveBlockWithNum,
+) -> Result<(), Error> {
     if block.transactions.is_empty() {
         info!("No Podpings for block {}", block.block_num);
     } else {
@@ -47,32 +50,40 @@ async fn disk_write_block_transactions(data_dir_path: PathBuf, block: HiveBlockW
         for tx in &block.transactions {
             for (i, podping) in tx.podpings.iter().enumerate() {
                 let podping_file = match podping {
-                    Podping::V0(_)
-                    | Podping::V02(_)
-                    | Podping::V03(_)
-                    | Podping::V10(_) => current_block_dir
-                        .join(format!("{}_{}_{}.json", block.block_num, tx.tx_id, i)),
-                    Podping::V11(pp) => current_block_dir
-                        .join(format!(
-                            "{}_{}_{}_{}.json",
-                            block.block_num,
-                            tx.tx_id,
-                            pp.session_id.to_string(),
-                            pp.timestamp_ns.to_string())
-                        ),
+                    Podping::V0(_) | Podping::V02(_) | Podping::V03(_) | Podping::V10(_) => {
+                        current_block_dir
+                            .join(format!("{}_{}_{}.json", block.block_num, tx.tx_id, i))
+                    }
+                    Podping::V11(pp) => current_block_dir.join(format!(
+                        "{}_{}_{}_{}.json",
+                        block.block_num,
+                        tx.tx_id,
+                        pp.session_id.to_string(),
+                        pp.timestamp_ns.to_string()
+                    )),
                 };
 
                 let json = serde_json::to_string(&podping);
 
                 match json {
                     Ok(json) => {
-                        info!("block: {}, tx: {}, podping: {}", block.block_num, tx.tx_id, json);
+                        info!(
+                            "block: {}, tx: {}, podping: {}",
+                            block.block_num, tx.tx_id, json
+                        );
 
-                        info!("Writing podping to file: {}", podping_file.to_string_lossy());
+                        info!(
+                            "Writing podping to file: {}",
+                            podping_file.to_string_lossy()
+                        );
                         write_join_set.spawn(tokio::fs::write(podping_file, json));
                     }
                     Err(e) => {
-                        error!("Error writing podping file {}: {}", podping_file.to_string_lossy(), e);
+                        error!(
+                            "Error writing podping file {}: {}",
+                            podping_file.to_string_lossy(),
+                            e
+                        );
                     }
                 }
             }
@@ -91,7 +102,7 @@ pub enum TrimLevel {
     Day,
     Hour,
     Minute,
-    Second
+    Second,
 }
 
 fn get_days_from_month(year: i32, month: u32) -> u32 {
@@ -106,61 +117,71 @@ fn get_days_from_month(year: i32, month: u32) -> u32 {
         },
         1,
     )
-        .unwrap()
-        .signed_duration_since(NaiveDate::from_ymd_opt(year, month, 1).unwrap())
-        .num_days() as u32
+    .unwrap()
+    .signed_duration_since(NaiveDate::from_ymd_opt(year, month, 1).unwrap())
+    .num_days() as u32
 }
 
-fn entry_path_to_date(entry_path: &PathBuf, date_regex: &Regex) -> Result<Option<DateTime<Utc>>, Report> {
+fn entry_path_to_date(
+    entry_path: &PathBuf,
+    date_regex: &Regex,
+) -> Result<Option<DateTime<Utc>>, Error> {
     let entry_str = entry_path.to_string_lossy();
     let captures = date_regex.captures(&entry_str);
 
     let (year, month, day, hour, minute, second) = match captures {
-        Some(caps) => {
-            (
-                match caps.name("year") {
-                    Some(m) => m.as_str().parse::<u32>().unwrap_or(0),
-                    None => 0
-                },
-                match caps.name("month") {
-                    Some(m) => m.as_str().parse::<u32>().unwrap_or(12),
-                    None => 12
-                },
-                match caps.name("day") {
-                    Some(m) => m.as_str().parse::<u32>().unwrap_or(0),
-                    None => 0
-                },
-                match caps.name("hour") {
-                    Some(m) => m.as_str().parse::<u32>().unwrap_or(23),
-                    None => 23
-                },
-                match caps.name("minute") {
-                    Some(m) => m.as_str().parse::<u32>().unwrap_or(59),
-                    None => 59
-                },
-                match caps.name("second") {
-                    Some(m) => m.as_str().parse::<u32>().unwrap_or(59),
-                    None => 59
-                },
-            )
-        },
-        None => return Ok(None)
+        Some(caps) => (
+            match caps.name("year") {
+                Some(m) => m.as_str().parse::<u32>().unwrap_or(0),
+                None => 0,
+            },
+            match caps.name("month") {
+                Some(m) => m.as_str().parse::<u32>().unwrap_or(12),
+                None => 12,
+            },
+            match caps.name("day") {
+                Some(m) => m.as_str().parse::<u32>().unwrap_or(0),
+                None => 0,
+            },
+            match caps.name("hour") {
+                Some(m) => m.as_str().parse::<u32>().unwrap_or(23),
+                None => 23,
+            },
+            match caps.name("minute") {
+                Some(m) => m.as_str().parse::<u32>().unwrap_or(59),
+                None => 59,
+            },
+            match caps.name("second") {
+                Some(m) => m.as_str().parse::<u32>().unwrap_or(59),
+                None => 59,
+            },
+        ),
+        None => return Ok(None),
     };
 
     let actual_day = match day {
         0 => get_days_from_month(year as i32, month),
-        _ => day
+        _ => day,
     };
 
-    Ok(Some(Utc.with_ymd_and_hms(year as i32, month, actual_day, hour, minute, second).unwrap()))
+    Ok(Some(
+        Utc.with_ymd_and_hms(year as i32, month, actual_day, hour, minute, second)
+            .unwrap(),
+    ))
 }
 
-fn disk_trim_before(data_dir_path: &PathBuf, keep_after: DateTime<Utc>, trim_level: &Option<TrimLevel>) -> Result<(), Report> {
-    let date_regex =  Regex::new(r"^.*?/(?<year>\d+)/?(?<month>\d+)?/?(?<day>\d+)?/?(?<hour>\d+)?/?(?<minute>\d+)?/?(?<second>\d+)?$")?;
+fn disk_trim_before(
+    data_dir_path: &PathBuf,
+    keep_after: DateTime<Utc>,
+    trim_level: &Option<TrimLevel>,
+) -> Result<(), Error> {
+    let date_regex = Regex::new(
+        r"^.*?/(?<year>\d+)/?(?<month>\d+)?/?(?<day>\d+)?/?(?<hour>\d+)?/?(?<minute>\d+)?/?(?<second>\d+)?$",
+    )?;
 
     let level = match trim_level {
         Some(l) => l,
-        None => return Ok(())
+        None => return Ok(()),
     };
 
     let next_level = match level {
@@ -169,20 +190,24 @@ fn disk_trim_before(data_dir_path: &PathBuf, keep_after: DateTime<Utc>, trim_lev
         TrimLevel::Day => Some(TrimLevel::Hour),
         TrimLevel::Hour => Some(TrimLevel::Minute),
         TrimLevel::Minute => Some(TrimLevel::Second),
-        TrimLevel::Second => None
+        TrimLevel::Second => None,
     };
 
     for entry_result in WalkDir::new(data_dir_path).min_depth(1).max_depth(1) {
         let dir_entry = match entry_result {
             Ok(entry) => entry,
             Err(e) => {
-                error!("Error trimming old disk files under {}: {}", data_dir_path.to_string_lossy(), e);
-                break
+                error!(
+                    "Error trimming old disk files under {}: {}",
+                    data_dir_path.to_string_lossy(),
+                    e
+                );
+                break;
             }
         };
 
         if !dir_entry.file_type().is_dir() {
-            break
+            break;
         }
 
         let entry_path = dir_entry.into_path();
@@ -194,7 +219,10 @@ fn disk_trim_before(data_dir_path: &PathBuf, keep_after: DateTime<Utc>, trim_lev
                 match entry_date {
                     Some(d) => {
                         if d < keep_after {
-                            info!("disk trim: deleting directory {}", entry_path.to_string_lossy());
+                            info!(
+                                "disk trim: deleting directory {}",
+                                entry_path.to_string_lossy()
+                            );
                             remove_dir_all(entry_path)?;
                         } else {
                             // Check if any children in the current entry will always be ahead
@@ -209,24 +237,30 @@ fn disk_trim_before(data_dir_path: &PathBuf, keep_after: DateTime<Utc>, trim_lev
                             };
 
                             if !skip_scan {
-                                debug!("disk trim: scanning directory {}", entry_path.to_string_lossy());
+                                debug!(
+                                    "disk trim: scanning directory {}",
+                                    entry_path.to_string_lossy()
+                                );
                                 disk_trim_before(&entry_path, keep_after, &next_level)?
                             } else {
-                                debug!("disk trim: skipping directory {}", entry_path.to_string_lossy());
+                                debug!(
+                                    "disk trim: skipping directory {}",
+                                    entry_path.to_string_lossy()
+                                );
                             }
                         }
-                    },
-                    None => break
+                    }
+                    None => break,
                 }
             }
-            _ => break
+            _ => break,
         };
     }
 
     Ok(())
 }
 
-pub fn disk_trim_old(data_dir_path: &PathBuf, keep_duration: Duration) -> Result<(), Report> {
+pub fn disk_trim_old(data_dir_path: &PathBuf, keep_duration: Duration) -> Result<(), Error> {
     info!("disk trim: starting");
     let now = Utc::now();
 
@@ -237,68 +271,69 @@ pub fn disk_trim_old(data_dir_path: &PathBuf, keep_duration: Duration) -> Result
     disk_trim_before(data_dir_path, keep_after, &Some(TrimLevel::Year))?;
 
     info!("disk trim: trimming complete");
-    
+
     Ok(())
 }
-
 
 pub(crate) struct DiskWriter {
     directory: PathBuf,
     last_block_file: PathBuf,
-    keep_duration: Option<Duration>
+    keep_duration: Option<Duration>,
 }
 
 impl Writer for DiskWriter {
-    fn new(settings: &Settings) -> Self
+    async fn new(settings: &Settings) -> Self
     where
-        Self: Sized
+        Self: Sized,
     {
         let dir_path = match settings.writer.disk_directory.clone() {
             Some(disk_directory) => match disk_directory.is_empty() {
                 true => panic!("Data directory is empty"),
                 false => PathBuf::from(disk_directory),
             },
-            None => panic!("Data directory is not set!")
+            None => panic!("Data directory is not set!"),
         };
 
         if !dir_path.is_dir() {
-            panic!("Data directory {} is not a directory.  Please ensure it exists", dir_path.display());
+            panic!(
+                "Data directory {} is not a directory.  Please ensure it exists",
+                dir_path.display()
+            );
         }
 
         let last_block_file = dir_path.join(LAST_UPDATED_BLOCK_FILENAME);
-        
+
         match settings.writer.disk_trim_old.unwrap_or(false) {
-            true => DiskWriter {
-                directory: dir_path,
-                last_block_file,
-                keep_duration: Some(
-                    settings.writer.disk_trim_keep_duration.expect(
-                        "disk_trim_old is enabled but disk_trim_keep_duration is not set!"
-                    )
-                )
-            },
+            true => {
+                DiskWriter {
+                    directory: dir_path,
+                    last_block_file,
+                    keep_duration: Some(settings.writer.disk_trim_keep_duration.expect(
+                        "disk_trim_old is enabled but disk_trim_keep_duration is not set!",
+                    )),
+                }
+            }
             false => DiskWriter {
                 directory: dir_path,
                 last_block_file,
-                keep_duration: None
-            }
+                keep_duration: None,
+            },
         }
-        
     }
 
-    async fn get_last_block(&self) -> Option<u64> {
+    async fn get_last_block(&self) -> Result<Option<u64>, Error> {
         match tokio::fs::read_to_string(&self.last_block_file).await {
             Ok(s) => match s.trim().parse::<u64>() {
-                Ok(block) => Some(block),
-                _ => None
+                Ok(block) => Ok(Some(block)),
+                _ => Ok(None),
             },
-            _ => None
+            Err(e) => Err(e.into()),
         }
     }
 
-    async fn start(&self, mut rx: Receiver<HiveBlockWithNum>) -> color_eyre::Result<(), Report> {
+    async fn start(&self, mut rx: Receiver<HiveBlockWithNum>) -> Result<(), Error> {
         let mut start_time = Instant::now();
-        
+
         loop {
             let result = rx.recv().await;
 
@@ -321,15 +356,15 @@ impl Writer for DiskWriter {
                 Some(keep_duration) => {
                     let now = Instant::now();
 
-                    if now - start_time >= Duration::from_secs(1*60*60) {
+                    if now - start_time >= Duration::from_secs(1 * 60 * 60) {
                         disk_trim_old(&self.directory.clone(), keep_duration)?;
 
                         start_time = Instant::now();
                     }
                 }
-                None => ()
+                None => (),
             };
-            
+
             match block {
                 Some(block) => {
                     let block_num = block.block_num.to_owned();
@@ -338,10 +373,10 @@ impl Writer for DiskWriter {
                 }
                 None => {}
             }
-        };
+        }
     }
 
-    async fn start_batch(&self, mut rx: Receiver<Vec<HiveBlockWithNum>>) -> color_eyre::Result<(), Report> {
+    async fn start_batch(&self, mut rx: Receiver<Vec<HiveBlockWithNum>>) -> Result<(), Error> {
         loop {
             let result = rx.recv().await;
 
@@ -352,9 +387,7 @@ impl Writer for DiskWriter {
 
                     None
                 }
-                Err(RecvError::Closed) => {
-                    break
-                }
+                Err(RecvError::Closed) => break,
             };
 
             match block {
@@ -363,7 +396,8 @@ impl Writer for DiskWriter {
                     let mut write_join_set = JoinSet::new();
 
                     for block in blocks {
-                        write_join_set.spawn(disk_write_block_transactions(self.directory.clone(), block));
+                        write_join_set
+                            .spawn(disk_write_block_transactions(self.directory.clone(), block));
                     }
 
                     write_join_set.join_all().await;
@@ -372,7 +406,7 @@ impl Writer for DiskWriter {
                 }
                 None => {}
             }
-        };
+        }
 
         Ok(())
     }

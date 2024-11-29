@@ -31,6 +31,12 @@ pub enum WriterType {
 }
 
 #[derive(Debug, Deserialize)]
+pub enum WriterUrlStyle {
+    Path,
+    VirtualHost
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Writer {
     pub(crate) enabled: bool,
     pub(crate) disable_persistence_warnings: bool,
@@ -46,8 +52,8 @@ pub struct Writer {
 
     pub(crate) object_storage_base_url: Option<String>,
     pub(crate) object_storage_bucket_name: Option<String>,
-    pub(crate) object_storage_access_key: Option<String>,
-    pub(crate) object_storage_access_secret: Option<String>,
+    pub(crate) object_storage_region: Option<String>,
+    pub(crate) object_storage_url_style: Option<WriterUrlStyle>
 }
 
 #[derive(Debug, Deserialize)]

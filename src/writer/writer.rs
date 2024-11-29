@@ -9,16 +9,25 @@
  *
  *     You should have received a copy of the GNU Lesser General Public License along with podpingd. If not, see <https://www.gnu.org/licenses/>.
  */
-use color_eyre::Report;
-use tokio::sync::broadcast::Receiver;
 use crate::config::Settings;
 use crate::hive::scanner::HiveBlockWithNum;
+use color_eyre::eyre::Error;
+use color_eyre::Result;
+use tokio::sync::broadcast::Receiver;
 
 pub(crate) trait Writer {
-    fn new(settings: &Settings) -> Self where Self: Sized;
-    async fn get_last_block(&self) -> Option<u64>;
-    fn start(&self, rx: Receiver<HiveBlockWithNum>) -> impl std::future::Future<Output = Result<(), Report>> + Send;
-    fn start_batch(&self, rx: Receiver<Vec<HiveBlockWithNum>>) -> impl std::future::Future<Output = Result<(), Report>> + Send;
+    async fn new(settings: &Settings) -> Self
+    where
+        Self: Sized;
+    async fn get_last_block(&self) -> Result<Option<u64>, Error>;
+    fn start(
+        &self,
+        rx: Receiver<HiveBlockWithNum>,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
+    fn start_batch(
+        &self,
+        rx: Receiver<Vec<HiveBlockWithNum>>,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 }
 
 pub const LAST_UPDATED_BLOCK_FILENAME: &str = "last_updated_block";
