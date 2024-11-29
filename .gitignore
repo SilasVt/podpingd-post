@@ -1,5 +1,6 @@
 conf/*
 !conf/00-default.toml
+!conf/99-example*.toml
 
 data*
 test-data

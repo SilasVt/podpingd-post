@@ -4,6 +4,8 @@
 debug = false
 
 [scanner]
+# These are some default nodes tested
+# You can use others, or set your own
 rpc_nodes = [
     "https://rpc.podping.org",
     "https://hive-api.web3telekom.xyz",
@@ -33,7 +35,7 @@ enabled = true
 disable_persistence_warnings = false
 
 type = "disk"
-#type = "object_storage"
+#type = "objectstorage"
 
 # Settings for type "disk"
 disk_directory = "./data"
@@ -44,7 +46,8 @@ disk_trim_old = false
 # Note that years and months are *not* calendar based
 disk_trim_keep_duration = "1month"
 
-# Settings for type "object_storage"
+# Settings for type "objectstorage"
+# set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY separately
 object_storage_base_url = ""
 object_storage_bucket_name = ""
 object_storage_region = ""

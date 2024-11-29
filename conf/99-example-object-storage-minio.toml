@@ -1,0 +1,25 @@
+# To use this, copy this file somewhere and set
+# an environment variable PODPINGD_CONFIG_FILE=<your-file-path.yaml>
+debug = false
+
+[scanner]
+rpc_nodes = [
+    "https://rpc.podping.org",
+    "https://hive-api.web3telekom.xyz",
+    "https://api.openhive.network",
+    "https://hived.emre.sh",
+    "https://hive-api.arcange.eu",
+    "https://rpc.mahdiyari.info",
+    "https://rpc.ecency.com",
+]
+
+[writer]
+enabled = true
+
+type = "objectstorage"
+
+# set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY separately
+object_storage_base_url = "https://your-minio-domain:9000"
+object_storage_bucket_name = "podping"
+object_storage_region = "minio"
+object_storage_url_style = "path"
