@@ -2,6 +2,12 @@
 
 `podpingd` is a daemon to sync podpings to a variety of storage mediums.
 
+It currently supports writing to:
+
+* Local disk
+* Object storage
+* Console only
+
 ## Running
 
 To start, you need cargo. The most basic command is:
