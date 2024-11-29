@@ -59,14 +59,15 @@ async fn main() -> Result<()> {
 
     match settings.writer.enabled {
         true => {
-            info!("Writing podpings to the the local disk.");
             match settings.writer.type_ {
                 Some(WriterType::Disk) => {
+                    info!("Writing podpings to the local disk.");
                     let syncer = Syncer::<JsonRpcClientImpl, DiskWriter>::new(&settings).await?;
 
                     syncer.start().await?;
                 }
                 Some(WriterType::ObjectStorage) => {
+                    info!("Writing podpings to object storage.");
                     let syncer =
                         Syncer::<JsonRpcClientImpl, ObjectStorageWriter>::new(&settings).await?;
 
