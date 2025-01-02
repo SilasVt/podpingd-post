@@ -9,23 +9,23 @@
  *
  *     You should have received a copy of the GNU Lesser General Public License along with podpingd. If not, see <https://www.gnu.org/licenses/>.
  */
-use std::sync::Arc;
-use std::time::Duration;
-use chrono::{DateTime, TimeDelta, Utc};
-use color_eyre::{Report, Result};
-use jsonrpsee::core::ClientError::{ParseError, RestartNeeded, Transport};
-use jsonrpsee::core::params::BatchRequestBuilder;
-use podping_schemas::org::podcastindex::podping::podping_json::Podping;
-use tracing::{error, trace, warn};
-use tokio::sync::broadcast::Sender;
-use tokio::time::sleep;
-use regex::Regex;
-use tokio::sync::Mutex;
-use crate::hive::jsonrpc::{block_api, condenser_api};
 use crate::hive::jsonrpc::client::JsonRpcClient;
 use crate::hive::jsonrpc::request_params::GetBlockParams;
 use crate::hive::jsonrpc::responses::{GetBlockResponse, GetDynamicGlobalPropertiesResponse};
-
+use crate::hive::jsonrpc::{block_api, condenser_api};
+use chrono::{DateTime, TimeDelta, Utc};
+use color_eyre::{Report, Result};
+use jsonrpsee::core::params::BatchRequestBuilder;
+use jsonrpsee::core::ClientError::{ParseError, RestartNeeded, Transport};
+use podping_schemas::org::podcastindex::podping::podping_json::Podping;
+use rand::Rng;
+use regex::Regex;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::broadcast::Sender;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
+use tracing::{error, trace, warn};
 
 #[derive(Debug, Clone)]
 pub(crate) struct HiveBlockWithNum {
@@ -41,19 +41,21 @@ pub(crate) struct HiveTransactionWithTxId {
 }
 
 pub(crate) async fn get_dynamic_global_properties(
-    json_rpc_client: Arc<Mutex<impl JsonRpcClient>>
+    json_rpc_client: Arc<Mutex<impl JsonRpcClient>>,
 ) -> Result<GetDynamicGlobalPropertiesResponse, Report> {
     let mut jpc = json_rpc_client.lock().await;
     let mut client = jpc.get_client();
-    
+
     loop {
-        let response: Result<GetDynamicGlobalPropertiesResponse, _> = condenser_api::get_dynamic_global_properties(&client).await;
-        trace!("condenser_api::get_dynamic_global_properties response: {:?}", response);
+        let response: Result<GetDynamicGlobalPropertiesResponse, _> =
+            condenser_api::get_dynamic_global_properties(&client).await;
+        trace!(
+            "condenser_api::get_dynamic_global_properties response: {:?}",
+            response
+        );
 
         match response {
-            Ok(r) => {
-                return Ok(r)
-            },
+            Ok(r) => return Ok(r),
             Err(e) => {
                 warn!("get_dynamic_global_properties error: {:#?}", e);
                 jpc.rotate_node()?;
@@ -61,20 +63,28 @@ pub(crate) async fn get_dynamic_global_properties(
                 warn!("Retrying get_dynamic_global_properties")
             }
         }
-
     }
 }
 
-pub fn block_response_to_hive_block(block_num: u64, id_regex: &Regex, response: GetBlockResponse) -> HiveBlockWithNum {
+pub fn block_response_to_hive_block(
+    block_num: u64,
+    id_regex: &Regex,
+    response: GetBlockResponse,
+) -> HiveBlockWithNum {
     HiveBlockWithNum {
         block_num,
         timestamp: response.block.timestamp,
-        transactions: response.block.transactions.into_iter()
+        transactions: response
+            .block
+            .transactions
+            .into_iter()
             .enumerate()
             .flat_map(|(i, tx)| {
                 Some(HiveTransactionWithTxId {
                     tx_id: response.block.transaction_ids[i].to_string(),
-                    podpings: tx.operations.into_iter()
+                    podpings: tx
+                        .operations
+                        .into_iter()
                         .filter_map(|op| -> Option<Podping> {
                             // I tried to move this into its own function,
                             // but failed miserably because I needed a closure
@@ -87,45 +97,41 @@ pub fn block_response_to_hive_block(block_num: u64, id_regex: &Regex, response: 
                             }
 
                             match &op.value {
-                                Some(op_value) => {
-                                    match &op_value.id {
-                                        Some(id) => {
-                                            if id_regex.is_match(id) {
-                                                match &op.value {
-                                                    Some(op_value) => {
-                                                        match &op_value.json {
-                                                            Some(podping) => {
-                                                                Some(podping.clone())
-                                                            }
-                                                            None => None
-                                                        }
-                                                    }
-                                                    None => None
-                                                }
-                                            } else {
-                                                None
+                                Some(op_value) => match &op_value.id {
+                                    Some(id) => {
+                                        if id_regex.is_match(id) {
+                                            match &op.value {
+                                                Some(op_value) => match &op_value.json {
+                                                    Some(podping) => Some(podping.clone()),
+                                                    None => None,
+                                                },
+                                                None => None,
                                             }
+                                        } else {
+                                            None
                                         }
-                                        None => None
                                     }
-                                }
-                                None => None
+                                    None => None,
+                                },
+                                None => None,
                             }
                         })
                         .collect::<Vec<_>>(),
                 })
             })
-            .filter(|tx| {
-                !tx.podpings.is_empty()
-            }).collect::<Vec<_>>(),
+            .filter(|tx| !tx.podpings.is_empty())
+            .collect::<Vec<_>>(),
     }
 }
 
-async fn send_block<S: Send, T: ToOwned<Owned=S>>(tx: &Sender<S>, block: T) {
+async fn send_block<S: Send, T: ToOwned<Owned = S>>(tx: &Sender<S>, block: T) {
     loop {
         match tx.send(block.to_owned()) {
             Ok(_) => break,
             Err(e) => {
+                if e.to_string() == "channel closed" {
+                    panic!("Scanner send error {}", e);
+                }
                 warn!("Scanner send error {}", e);
                 sleep(Duration::from_millis(10)).await;
             }
@@ -197,7 +203,7 @@ pub async fn catchup_chain(
 
         for block_num in &chunk {
             let params = GetBlockParams {
-                block_num: &block_num
+                block_num: &block_num,
             };
 
             block_api::build_get_block_batch_params(params, &mut batch_request_builder)
@@ -210,10 +216,12 @@ pub async fn catchup_chain(
         match batch_response {
             Ok(batch_response) => {
                 let responses_with_block_num = chunk.into_iter().zip(batch_response);
-                let blocks = responses_with_block_num.map(|(block_num, entry)| {
-                    let response = entry.unwrap();
-                    block_response_to_hive_block(block_num, &id_regex, response)
-                }).collect::<Vec<_>>();
+                let blocks = responses_with_block_num
+                    .map(|(block_num, entry)| {
+                        let response = entry.unwrap();
+                        block_response_to_hive_block(block_num, &id_regex, response)
+                    })
+                    .collect::<Vec<_>>();
 
                 send_block(&tx, blocks).await;
             }
@@ -257,6 +265,9 @@ pub async fn scan_chain(
 ) -> Result<(), Report> {
     let mut jpc = json_rpc_client.lock().await;
     let mut client = jpc.get_client();
+    let mut retry_num: u32 = 0;
+    let retry_wait_millis: u64 = 10;
+    let max_retry_wait_millis: u64 = 300000;
 
     let mut block_num = start_block;
 
@@ -267,7 +278,7 @@ pub async fn scan_chain(
         let start_time = Utc::now();
 
         let params = GetBlockParams {
-            block_num: &block_num
+            block_num: &block_num,
         };
 
         let response: Result<GetBlockResponse, _> = block_api::get_block(&client, params).await;
@@ -282,6 +293,8 @@ pub async fn scan_chain(
                 send_block(&tx, block).await;
 
                 block_num += 1;
+
+                retry_num = 0;
 
                 let end_time = Utc::now();
 
@@ -311,8 +324,15 @@ pub async fn scan_chain(
             }
             Err(Transport(e)) => {
                 warn!("{:#?}", e);
-                jpc.rotate_node()?;
-                client = jpc.get_client();
+                retry_num += 1;
+                // Use an exponential backoff in the event of a network failure
+                let mut wait_time = retry_wait_millis.pow(retry_num);
+                if wait_time > max_retry_wait_millis {
+                    wait_time = max_retry_wait_millis;
+                }
+                let wait_jitter = rand::thread_rng().gen_range(wait_time / 2..wait_time);
+                let wait_duration = Duration::from_millis(wait_jitter);
+                sleep(wait_duration).await;
                 warn!("Retrying block {}", block_num)
             }
             Err(e) => {
