@@ -1,0 +1,26 @@
+# To use this, copy this file somewhere and set
+# an environment variable PODPINGD_CONFIG_FILE=<your-file-path.yaml>
+debug = false
+
+[scanner]
+rpc_nodes = [
+    "https://rpc.podping.org",
+    "https://hive-api.web3telekom.xyz",
+    "https://api.openhive.network",
+    "https://hived.emre.sh",
+    "https://hive-api.arcange.eu",
+    "https://rpc.mahdiyari.info",
+    "https://rpc.ecency.com",
+]
+
+[writer]
+enabled = true
+
+type = "objectstorage"
+
+# set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY separately
+# Make sure to change your region in BOTH object_storage_base_url AND object_storage_region
+object_storage_base_url = "https://us-ord-1.linodeobjects.com"
+object_storage_bucket_name = "podping"
+object_storage_region = "us-ord-1"
+object_storage_url_style = "virtualhost"
