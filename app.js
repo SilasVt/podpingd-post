@@ -2,6 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const chokidar = require("chokidar");
 
 // Configuration from environment variables
 const WATCH_DIR = process.env.WATCH_DIR || "/app/data";
@@ -205,27 +206,26 @@ async function waitForFileStability(
   return true;
 }
 
-// Set up file watcher
-const watcher = fs.watch(
-  WATCH_DIR,
-  { recursive: true },
-  async (eventType, filename) => {
-    if (!filename || !filename.endsWith(".json")) return;
+// Replace the fs.watch setup with chokidar
+const watcher = chokidar.watch(WATCH_DIR, {
+  persistent: true,
+  ignoreInitial: true,
+  awaitWriteFinish: {
+    stabilityThreshold: 1000,
+    pollInterval: 50,
+  },
+});
 
-    const filePath = path.join(WATCH_DIR, filename);
-    lastFileTime = Date.now();
+watcher.on("add", async (filePath) => {
+  if (!filePath.endsWith(".json")) return;
 
-    // Wait for file to stabilize
-    if (await waitForFileStability(filePath)) {
-      // Check if file still exists (might have been deleted)
-      if (fs.existsSync(filePath)) {
-        await processJsonFile(filePath);
-      }
-    } else {
-      console.log(`File ${filename} was deleted before processing`);
-    }
+  lastFileTime = Date.now();
+
+  // Check if file still exists (might have been deleted)
+  if (fs.existsSync(filePath)) {
+    await processJsonFile(filePath);
   }
-);
+});
 
 // Process existing files on startup
 async function processExistingFiles() {

@@ -48,15 +48,47 @@ docker build -t podpingd-post .
 docker run -d \
   --name podpingd-post \
   --env-file .env \
+  --cap-add SYS_RESOURCE \
   podpingd-post
 ```
 
 ## Monitoring
 
-The application logs to stdout/stderr and can be monitored using:
+The application logs can be monitored in several ways:
+
+### Live Container Logs
 
 ```shell
-docker logs -f podping-watcher
+docker logs -f podpingd-post
+```
+
+### Individual Component Logs
+
+View specific log files inside the container:
+
+```shell
+# Podpingd logs (Rust blockchain monitor)
+docker exec podpingd-post cat /var/log/supervisor/podpingd.log
+docker exec podpingd-post cat /var/log/supervisor/podpingd-err.log
+
+# Node.js poster logs
+docker exec podpingd-post cat /var/log/supervisor/poster.log
+docker exec podpingd-post cat /var/log/supervisor/poster-err.log
+
+# Supervisor logs
+docker exec podpingd-post cat /var/log/supervisor/supervisord.log
+```
+
+### Follow Logs in Real-time
+
+To watch logs as they update:
+
+```shell
+# Follow podpingd logs
+docker exec podpingd-post tail -f /var/log/supervisor/podpingd.log
+
+# Follow poster logs
+docker exec podpingd-post tail -f /var/log/supervisor/poster.log
 ```
 
 ## Error Handling
