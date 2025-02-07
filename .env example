@@ -1,0 +1,20 @@
+# Directory to watch for new files
+WATCH_DIR=/app/data
+
+# API endpoint for sending podping notifications
+TARGET_ENDPOINT=http://192.168.178.10/api/podping
+
+# Request configuration
+MAX_CONCURRENT_REQUESTS=5
+REQUEST_TIMEOUT_MS=30000
+REQUEST_RETRY_COUNT=3
+REQUEST_RETRY_DELAY_MS=3000
+
+# File monitoring configuration
+FILE_AGE_TIMEOUT_SEC=60
+FILE_WRITE_WAIT_MS=100
+
+# Podpingd configuration
+CONFIG_FILE=/app/conf/post-config.toml
+RESTART_MINUTES=3
+MAX_CONSECUTIVE_FAILURES=5 
