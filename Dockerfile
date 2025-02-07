@@ -64,8 +64,15 @@ USER podping
 RUN cargo build --release
 USER root
 
-# Create data directory for podpingd
-RUN mkdir -p /app/data
+# Create data directory for podpingd with correct permissions
+RUN mkdir -p /app/data && \
+    chown -R podping:podping /app/data && \
+    chmod 755 /app/data
+
+# Create and set permissions for config directory
+RUN mkdir -p /app/conf && \
+    chown -R podping:podping /app/conf && \
+    chmod 755 /app/conf
 
 # Adjust ownership for supervisor directories
 RUN chown -R podping:podping \
@@ -74,6 +81,14 @@ RUN chown -R podping:podping \
 
 # Make sure supervisor can write its pid file
 RUN mkdir -p /var/run && chown podping:podping /var/run
+
+# Copy configuration files
+COPY conf/post-config.toml /app/conf/
+COPY .env /app/
+
+# Set ownership of config files
+RUN chown podping:podping /app/.env && \
+    chown podping:podping /app/conf/post-config.toml
 
 # Use the entrypoint script
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

@@ -81,7 +81,7 @@ async function restartPodpingd() {
     // Write updated config
     await fs.promises.writeFile(CONFIG_FILE, configContent);
 
-    // Restart podpingd using supervisorctl
+    // Restart podpingd using supervisorctl (no credentials needed now)
     const { exec } = require("child_process");
     await new Promise((resolve, reject) => {
       exec("supervisorctl restart podpingd", (error, stdout, stderr) => {
@@ -139,14 +139,21 @@ async function processJsonFile(filePath) {
         consecutiveFailures = 0; // Reset counter on success
       } catch (error) {
         console.error(`ERROR: Request failed for ${filePath}:`, error.message);
-        consecutiveFailures++;
 
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-          console.error(
-            `${MAX_CONSECUTIVE_FAILURES} consecutive failures detected. Restarting podpingd...`
-          );
-          await restartPodpingd();
-          consecutiveFailures = 0; // Reset after restart
+        // Only increment failures for podpingd-related issues
+        // Network errors should not trigger podpingd restarts
+        if (!error.isAxiosError || error.code !== "ECONNREFUSED") {
+          consecutiveFailures++;
+
+          if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            console.error(
+              `${MAX_CONSECUTIVE_FAILURES} consecutive podping-related failures detected. Restarting podpingd...`
+            );
+            await restartPodpingd();
+            consecutiveFailures = 0; // Reset after restart
+          }
+        } else {
+          console.error("Network connection error - will retry on next file");
         }
       }
     });
@@ -246,9 +253,14 @@ setInterval(() => {
   const timeSinceLastFile = (Date.now() - lastFileTime) / 1000;
   if (timeSinceLastFile > FILE_AGE_TIMEOUT_SEC) {
     console.log(
-      `WARNING: No new files in the last ${FILE_AGE_TIMEOUT_SEC} seconds`
+      `INFO: No new files in the last ${FILE_AGE_TIMEOUT_SEC} seconds. This is normal if there are no new podping updates.`
     );
-    restartPodpingd();
+    // Only restart if it's been a very long time (e.g., 1 hour)
+    if (timeSinceLastFile > 3600) {
+      // 1 hour
+      console.log("WARNING: No files for over an hour. Restarting podpingd...");
+      restartPodpingd();
+    }
   }
 }, FILE_AGE_TIMEOUT_SEC * 1000);
 
