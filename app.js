@@ -81,10 +81,10 @@ async function restartPodpingd() {
     // Write updated config
     await fs.promises.writeFile(CONFIG_FILE, configContent);
 
-    // Restart podpingd using supervisorctl (no credentials needed now)
+    // Use sudo to restart podpingd
     const { exec } = require("child_process");
     await new Promise((resolve, reject) => {
-      exec("supervisorctl restart podpingd", (error, stdout, stderr) => {
+      exec("sudo supervisorctl restart podpingd", (error, stdout, stderr) => {
         if (error) {
           console.error("Error restarting podpingd:", error);
           reject(error);

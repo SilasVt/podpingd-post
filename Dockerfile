@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     ca-certificates \
     libssl-dev \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js and npm
@@ -89,6 +90,11 @@ COPY .env /app/
 # Set ownership of config files
 RUN chown podping:podping /app/.env && \
     chown podping:podping /app/conf/post-config.toml
+
+# Add podping user to sudo group and configure sudo access for supervisorctl
+RUN usermod -aG sudo podping && \
+    echo "podping ALL=(ALL) NOPASSWD: /usr/bin/supervisorctl" >> /etc/sudoers.d/podping && \
+    chmod 0440 /etc/sudoers.d/podping
 
 # Use the entrypoint script
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
