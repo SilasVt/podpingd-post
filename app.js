@@ -16,11 +16,15 @@ const REQUEST_RETRY_COUNT = parseInt(process.env.REQUEST_RETRY_COUNT || "3");
 const REQUEST_RETRY_DELAY_MS = parseInt(
   process.env.REQUEST_RETRY_DELAY_MS || "3000"
 );
-const FILE_AGE_TIMEOUT_SEC = parseInt(process.env.FILE_AGE_TIMEOUT_SEC || "60");
+const FILE_AGE_TIMEOUT_SEC = parseInt(process.env.FILE_AGE_TIMEOUT_SEC || "30");
 
 // Add new environment variables
 const CONFIG_FILE = process.env.CONFIG_FILE || "/app/conf/bp-config.toml";
 const RESTART_MINUTES = parseInt(process.env.RESTART_MINUTES || "3");
+const LOG_INTERVAL_MINUTES = parseInt(
+  process.env.LOG_INTERVAL_MINUTES || "0.5"
+);
+const RESTART_AFTER_MINS = parseInt(process.env.RESTART_AFTER_MINS || "1");
 
 // Create a request queue to manage concurrent requests
 class RequestQueue {
@@ -59,7 +63,9 @@ async function restartPodpingd() {
     const startTime = new Date(Date.now() - RESTART_MINUTES * 60 * 1000);
     const formattedTime = startTime.toISOString().replace("Z", "+0000");
 
-    console.log(`Restarting podpingd with start time: ${formattedTime}`);
+    console.log(
+      `Attempting to restart podpingd with start time: ${formattedTime}`
+    );
 
     // Read current config
     let configContent = await fs.promises.readFile(CONFIG_FILE, "utf8");
@@ -81,21 +87,39 @@ async function restartPodpingd() {
     // Write updated config
     await fs.promises.writeFile(CONFIG_FILE, configContent);
 
-    // Use sudo to restart podpingd
+    // Use sudo to restart podpingd with better error handling
     const { exec } = require("child_process");
     await new Promise((resolve, reject) => {
+      console.log("Executing supervisorctl restart command...");
       exec("sudo supervisorctl restart podpingd", (error, stdout, stderr) => {
         if (error) {
-          console.error("Error restarting podpingd:", error);
+          console.error("Error executing supervisorctl:", error);
+          console.error("Stderr:", stderr);
+          console.error("Stdout:", stdout);
           reject(error);
           return;
         }
-        console.log("Podpingd restart output:", stdout);
+        console.log("Podpingd restart command output:", stdout);
+        if (stderr) console.warn("Stderr output:", stderr);
+        resolve();
+      });
+    });
+
+    // Verify the service is running
+    await new Promise((resolve, reject) => {
+      exec("sudo supervisorctl status podpingd", (error, stdout, stderr) => {
+        if (error) {
+          console.error("Error checking podpingd status:", error);
+          reject(error);
+          return;
+        }
+        console.log("Podpingd status after restart:", stdout);
         resolve();
       });
     });
   } catch (error) {
     console.error("Failed to restart podpingd:", error);
+    console.error("Stack trace:", error.stack);
   }
 }
 
@@ -173,6 +197,7 @@ fs.mkdirSync(WATCH_DIR, { recursive: true });
 
 // Track last file modification time
 let lastFileTime = Date.now();
+let lastNoFileLogTime = Date.now();
 
 async function waitForFileStability(
   filePath,
@@ -248,21 +273,36 @@ async function processExistingFiles() {
   }
 }
 
-// Monitor for file age timeout
+// Replace the monitoring interval code
 setInterval(() => {
   const timeSinceLastFile = (Date.now() - lastFileTime) / 1000;
+  const timeSinceLastLog = (Date.now() - lastNoFileLogTime) / 1000;
+
   if (timeSinceLastFile > FILE_AGE_TIMEOUT_SEC) {
-    console.log(
-      `INFO: No new files in the last ${FILE_AGE_TIMEOUT_SEC} seconds. This is normal if there are no new podping updates.`
-    );
-    // Only restart if it's been a very long time (e.g., 1 hour)
-    if (timeSinceLastFile > 3600) {
-      // 1 hour
-      console.log("WARNING: No files for over an hour. Restarting podpingd...");
+    // Log status every 30 seconds
+    if (timeSinceLastLog > LOG_INTERVAL_MINUTES * 60) {
+      console.log(
+        `WARNING: No new podping updates in the last ${Math.floor(
+          timeSinceLastFile
+        )} seconds. Will restart podpingd after ${
+          RESTART_AFTER_MINS * 60
+        } seconds of inactivity.`
+      );
+      lastNoFileLogTime = Date.now();
+    }
+
+    // Restart after 1 minute of no new files
+    if (timeSinceLastFile > RESTART_AFTER_MINS * 60) {
+      console.log(
+        `ERROR: No new files for ${
+          RESTART_AFTER_MINS * 60
+        } seconds. Restarting podpingd...`
+      );
       restartPodpingd();
+      lastFileTime = Date.now(); // Reset timer after restart
     }
   }
-}, FILE_AGE_TIMEOUT_SEC * 1000);
+}, 15 * 1000); // Check every 15 seconds
 
 // Handle process termination
 function cleanup() {

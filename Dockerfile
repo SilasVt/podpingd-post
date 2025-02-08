@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     pkg-config \
     capnproto \
+    git \
     supervisor \
     ca-certificates \
     libssl-dev \
@@ -24,11 +25,31 @@ RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
 # Create dedicated non-root user and group
 RUN useradd -ms /bin/bash podping
 
-# Install Rust for podping user
+# Set working directory first
+WORKDIR /app
+
+# Copy source files into the container
+COPY . .
+
+# Set ownership of all files to podping user
+RUN chown -R podping:podping /app
+
+# Install Rust and build the project as podping user
 USER podping
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.75.0
 ENV PATH="/home/podping/.cargo/bin:${PATH}"
+ENV RUST_BACKTRACE=1
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+
+# Clear cargo cache and build the project
+RUN rm -rf ~/.cargo/registry && \
+    cargo clean && \
+    RUSTFLAGS="-C target-cpu=native" cargo build --release
 USER root
+
+# Initialize Node.js project and install dependencies
+COPY package*.json ./
+RUN npm install
 
 # Create needed directories (as root)
 RUN mkdir -p /var/log/supervisor
@@ -47,24 +68,6 @@ RUN mkdir -p /var/log/supervisor && \
     chown -R podping:podping /var/log/supervisor && \
     chmod 755 /var/log/supervisor
 
-# Set working directory
-WORKDIR /app
-
-# Initialize Node.js project and install dependencies
-COPY package*.json ./
-RUN npm install
-
-# Copy source files into the container
-COPY . .
-
-# Set ownership of all files to podping user
-RUN chown -R podping:podping /app
-
-# Build the Rust project (as root)
-USER podping
-RUN cargo build --release
-USER root
-
 # Create data directory for podpingd with correct permissions
 RUN mkdir -p /app/data && \
     chown -R podping:podping /app/data && \
@@ -75,13 +78,17 @@ RUN mkdir -p /app/conf && \
     chown -R podping:podping /app/conf && \
     chmod 755 /app/conf
 
-# Adjust ownership for supervisor directories
+# Adjust ownership for supervisor directories and socket
 RUN chown -R podping:podping \
     /var/log/supervisor \
-    /etc/supervisor/conf.d
+    /etc/supervisor/conf.d \
+    /var/run && \
+    chmod 755 /var/run
 
-# Make sure supervisor can write its pid file
-RUN mkdir -p /var/run && chown podping:podping /var/run
+# Configure sudo access for supervisorctl more permissively
+RUN usermod -aG sudo podping && \
+    echo "podping ALL=(ALL) NOPASSWD: /usr/bin/supervisorctl *" >> /etc/sudoers.d/podping && \
+    chmod 0440 /etc/sudoers.d/podping
 
 # Copy configuration files
 COPY conf/post-config.toml /app/conf/
@@ -90,11 +97,6 @@ COPY .env /app/
 # Set ownership of config files
 RUN chown podping:podping /app/.env && \
     chown podping:podping /app/conf/post-config.toml
-
-# Add podping user to sudo group and configure sudo access for supervisorctl
-RUN usermod -aG sudo podping && \
-    echo "podping ALL=(ALL) NOPASSWD: /usr/bin/supervisorctl" >> /etc/sudoers.d/podping && \
-    chmod 0440 /etc/sudoers.d/podping
 
 # Use the entrypoint script
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
