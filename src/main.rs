@@ -23,11 +23,33 @@ use crate::writer::disk_writer::DiskWriter;
 use crate::writer::object_storage_writer::ObjectStorageWriter;
 use color_eyre::eyre::Result;
 use tracing::{info, warn, Level};
+use reqwest::Client;
+use serde::Serialize;
+use serde_json::json;
+use tokio::time::{sleep, Duration};
 // for historical purposes
 //const FIRST_PODPING_BLOCK: u64 = 53_691_004;
 
+// Define a struct that represents a blockchain event
+#[derive(Serialize)]
+struct HiveEvent {
+    action: String,
+    data: String,
+}
+
+// Dummy async function simulating event retrieval from the Hive blockchain
+async fn listen_to_event() -> HiveEvent {
+    // Replace with your actual logic to fetch and process events from the Hive blockchain
+    // For demonstration, we simulate a delay and then return a dummy event.
+    sleep(Duration::from_secs(5)).await;
+    HiveEvent {
+        action: "new_post".to_string(),
+        data: "This is simulated event data.".to_string(),
+    }
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), reqwest::Error> {
     color_eyre::install()?;
 
     let settings = config::load_config();
@@ -94,6 +116,35 @@ async fn main() -> Result<()> {
             let syncer = Syncer::<JsonRpcClientImpl, ConsoleWriter>::new(&settings).await?;
 
             syncer.start().await?;
+        }
+    }
+
+    let client = Client::new();
+    let target_endpoint = "http://example.com/api/podping";
+
+    loop {
+        // Listen for a new Hive blockchain event
+        let event = listen_to_event().await;
+
+        // Create the JSON payload, here using serde_json::json macro. You can also serialize using event directly.
+        let payload = json!({
+            "action": event.action,
+            "data": event.data,
+        });
+
+        // Send a POST request with the event as JSON payload
+        match client.post(target_endpoint)
+            .json(&payload)
+            .send()
+            .await {
+            Ok(response) => {
+                println!("HTTP status: {}", response.status());
+                // Additional error handling based on status code can be done here.
+            }
+            Err(error) => {
+                eprintln!("HTTP request failed: {}", error);
+                // Optionally retry or handle error accordingly.
+            }
         }
     }
 

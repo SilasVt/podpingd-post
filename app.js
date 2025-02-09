@@ -238,26 +238,31 @@ async function waitForFileStability(
   return true;
 }
 
-// Replace the fs.watch setup with chokidar
-const watcher = chokidar.watch(WATCH_DIR, {
-  persistent: true,
-  ignoreInitial: true,
-  awaitWriteFinish: {
-    stabilityThreshold: 1000,
-    pollInterval: 50,
-  },
-});
+// Create the watcher in a separate function for easy reinitialization
+function createWatcher() {
+  const newWatcher = chokidar.watch(WATCH_DIR, {
+    persistent: true,
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 1000,
+      pollInterval: 50,
+    },
+  });
 
-watcher.on("add", async (filePath) => {
-  if (!filePath.endsWith(".json")) return;
+  newWatcher.on("add", async (filePath) => {
+    if (!filePath.endsWith(".json")) return;
+    lastFileTime = Date.now();
+    // Process the file if it exists
+    if (fs.existsSync(filePath)) {
+      await processJsonFile(filePath);
+    }
+  });
 
-  lastFileTime = Date.now();
+  return newWatcher;
+}
 
-  // Check if file still exists (might have been deleted)
-  if (fs.existsSync(filePath)) {
-    await processJsonFile(filePath);
-  }
-});
+// Initialize the watcher using our createWatcher function
+let watcher = createWatcher();
 
 // Process existing files on startup
 async function processExistingFiles() {
@@ -304,12 +309,32 @@ setInterval(() => {
   }
 }, 15 * 1000); // Check every 15 seconds
 
-// Handle process termination
-function cleanup() {
-  watcher.close();
-  process.exit(0);
+// Periodically refresh the watcher every 2 minutes
+setInterval(async () => {
+  try {
+    console.log("Refreshing file watcher...");
+    await watcher.close();
+    watcher = createWatcher();
+    console.log("File watcher refreshed successfully.");
+  } catch (error) {
+    console.error("Error while refreshing watcher:", error);
+  }
+}, 2 * 60 * 1000); // every 2 minutes
+
+// Updated cleanup function to wait for watcher closure
+async function cleanup() {
+  try {
+    console.log("Closing file watcher...");
+    await watcher.close();
+    console.log("File watcher closed. Exiting process.");
+  } catch (error) {
+    console.error("Error closing watcher:", error);
+  } finally {
+    process.exit(0);
+  }
 }
 
+// Updated signal handling to support async cleanup
 process.on("SIGTERM", cleanup);
 process.on("SIGINT", cleanup);
 
